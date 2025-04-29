@@ -5,3 +5,8 @@ myenv/
 __pycache__/
 *.py[cod]
 
+myenv/
+.venv/
+__pycache__/
+*.py[cod]
+
