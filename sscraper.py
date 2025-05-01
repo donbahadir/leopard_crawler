@@ -31,7 +31,7 @@ from crawl4ai.content_filter_strategy import PruningContentFilter
 
 # Input file containing URLs (produced by the crawler)
 INPUT_FILE = (
-    "/Users/don/Desktop/RAG DATA/crawled_links/academics.lafayette.edu__crawled_links.json"  # ⬅ adjust as needed or pass via CLI
+    "/Users/don/Desktop/RAG DATA/crawled_links/academics.lafayette.edu_crawled_links.json"  # ⬅ adjust as needed or pass via CLI
 )
 
 # Output directory for scraped markdown JSON files
