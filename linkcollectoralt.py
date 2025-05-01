@@ -162,6 +162,7 @@ from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig, CacheMode
 Exhaustive sub‑domain crawler
 -----------------------------
 Crawls *every* internal link discovered under the given start URL (no depth limit).
+Skips any link that ends with a “#page” fragment (e.g. https://example.com/#page).
 Results are saved into two arrays (html/document) inside a JSON file per start URL.
 """
 
@@ -184,7 +185,6 @@ else:
             START_URLS = []
             print("JSON file was empty or malformed. Initialised with an empty list.")
 
-# If the file was empty, inject a sensible default so the script still runs.
 if not START_URLS:
     default_url = "https://academics.lafayette.edu/"
     START_URLS.append(default_url)
@@ -192,7 +192,7 @@ if not START_URLS:
         json.dump(START_URLS, f, indent=2)
     print(f"No URLs found in JSON → added default URL: {default_url}")
 
-BATCH_SIZE = 8   # concurrent crawls per batch — keep modest to avoid bans
+BATCH_SIZE = 8   # concurrent crawls per batch
 
 # ---------------------------------------------------------------------------
 # 🌐  AsyncWebCrawler configuration
@@ -231,12 +231,17 @@ def is_html_or_doc(url: str) -> bool:
 
 
 def is_excluded(url: str) -> bool:
-    """Placeholder for custom exclusion regexes (pagination, tracking, etc.)."""
+    """Skip links we explicitly don’t want (marketing params, calendars, etc.)."""
     exclude_patterns: list[str] = [
-        # r"\\?utm_",             # example: strip marketing params
-        # r"/calendar/\\d{4}/",   # example: avoid endless calendars
+        # r"\?utm_",             # example: strip marketing params
+        # r"/calendar/\d{4}/",   # example: avoid endless calendars
     ]
     return any(re.search(pat, url) for pat in exclude_patterns)
+
+
+def has_page_fragment(url: str) -> bool:
+    """Return True if the URL fragment is exactly '#page'."""
+    return urlparse(url).fragment.lower() == "page"
 
 # ---------------------------------------------------------------------------
 # 🕸️  Crawler core
@@ -253,14 +258,13 @@ async def crawl_site(start_url: str) -> None:
     start = normalize_url(start_url)
     start_domain = urlparse(start).netloc
 
-    # pair of (url, depth) — depth is kept for debug/stats only
     queue: deque[tuple[str, int]] = deque([(start, 0)])
     queued.add(start)
 
     async with AsyncWebCrawler(config=browser_config) as crawler:
         while queue:
             url, depth = queue.popleft()
-            if url in visited:
+            if url in visited or has_page_fragment(url):
                 continue
 
             result = await crawler.arun(url, config=run_config)
@@ -273,16 +277,19 @@ async def crawl_site(start_url: str) -> None:
 
             visited.add(url)
 
-            # Parse internal links
             for link in result.links.get("internal", []):
                 raw = link.get("href")
                 if not raw:
                     continue
                 child = normalize_url(raw)
 
+                # Skip '#page' anchors early
+                if has_page_fragment(child):
+                    continue
+
                 child_domain = urlparse(child).netloc
                 if not (child_domain == start_domain or child_domain.endswith("." + start_domain)):
-                    continue  # outside subdomain
+                    continue
                 if child in visited or child in queued:
                     continue
                 if is_excluded(child) or not is_html_or_doc(child):
@@ -301,12 +308,10 @@ async def crawl_site(start_url: str) -> None:
     out_dir = "/Users/don/Desktop/RAG DATA/crawled_links"
     os.makedirs(out_dir, exist_ok=True)
 
-    outfile = (
-        f"{out_dir}/" + start.replace("https://", "").replace("/", "_") + "_crawled_links.json"
-    )
+    outfile = out_dir + "/" + start.replace("https://", "").replace("/", "_") + "_crawled_links.json"
 
     if start not in html_links:
-        html_links.insert(0, start)  # ensure seed is present
+        html_links.insert(0, start)
 
     with open(outfile, "w", encoding="utf-8") as f:
         json.dump({"html": html_links, "document": doc_links}, f, indent=2, ensure_ascii=False)
@@ -324,9 +329,8 @@ async def run_batches():
         await asyncio.gather(*(crawl_site(url) for url in batch))
         print("=" * 60)
         print(f"Batch {i // BATCH_SIZE + 1} / {((len(START_URLS) - 1) // BATCH_SIZE) + 1} completed\n")
-        await asyncio.sleep(2)  # polite pause between batches
+        await asyncio.sleep(2)
 
 
 if __name__ == "__main__":
     asyncio.run(run_batches())
-
